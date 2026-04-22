@@ -1,5 +1,9 @@
 import requests
 import time
+import random
+import string
+import asyncio
+from playwright.async_api import async_playwright
 
 BOT_TOKEN = "8570825705:AAFC2ytNrBeTGYJxe4qd07UoPVPjTzcFB3c"
 CHAT_ID = "5931826032"
@@ -7,19 +11,90 @@ last_update = 0
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    requests.get(url, params={"chat_id": CHAT_ID, "text": text})
+    try:
+        requests.get(url, params={"chat_id": CHAT_ID, "text": text}, timeout=10)
+    except:
+        pass
 
-print("Bot running. Send a message to your bot.")
+def create_temp_email():
+    try:
+        response = requests.get("https://api.temp-mail.org/api/v3/email/new", timeout=10)
+        return response.json()["email"]
+    except:
+        return None
+
+def check_inbox(email):
+    try:
+        response = requests.get(f"https://api.temp-mail.org/api/v3/email/{email}/messages", timeout=10)
+        if response.status_code == 200 and response.json():
+            for msg in response.json():
+                if "verify" in str(msg).lower() or "confirm" in str(msg).lower():
+                    return msg.get("html_url") or msg.get("mail_html", "")
+        return None
+    except:
+        return None
+
+async def register_and_generate(prompt_text):
+    email = create_temp_email()
+    if not email:
+        return "Failed to create email"
+    
+    password = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+    send_message(f"📧 Email: {email}\n🔑 Pass: {password}\n⏳ Registering...")
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+        
+        try:
+            await page.goto("https://arena.ai/signup")
+            await page.fill('input[name="email"]', email)
+            await page.fill('input[name="password"]', password)
+            await page.click('button[type="submit"]')
+            
+            for _ in range(6):
+                await asyncio.sleep(10)
+                verify_link = check_inbox(email)
+                if verify_link:
+                    await page.goto(verify_link)
+                    break
+            
+            await page.goto("https://arena.ai/video")
+            await page.fill('textarea, input[type="text"]', prompt_text)
+            await page.click('button[type="submit"]')
+            
+            await asyncio.sleep(30)
+            video_url = await page.locator('a[download], .video-url').first.text_content()
+            await browser.close()
+            return f"🎬 Video ready!\n\n{video_url}\n\nEmail: {email}"
+        except Exception as e:
+            await browser.close()
+            return f"❌ Error: {str(e)}"
+
+def handle_message(text):
+    send_message("🎬 Starting... Generating video...")
+    result = asyncio.run(register_and_generate(text))
+    send_message(result)
+
+print("🤖 FULL BOT RUNNING with Playwright...")
 
 while True:
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
-    response = requests.get(url, params={"offset": last_update + 1, "timeout": 30}).json()
-    
-    if response.get("ok") and response["result"]:
-        for update in response["result"]:
-            last_update = update["update_id"]
-            msg = update.get("message", {})
-            text = msg.get("text") or msg.get("caption", "")
-            send_message(f"Received: {text}")
-    
-    time.sleep(1)
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+        response = requests.get(url, params={"offset": last_update + 1, "timeout": 30}, timeout=35).json()
+        
+        if response.get("ok") and response["result"]:
+            for update in response["result"]:
+                last_update = update["update_id"]
+                msg = update.get("message", {})
+                text = msg.get("text") or msg.get("caption", "")
+                if text:
+                    handle_message(text)
+        
+        time.sleep(1)
+    except KeyboardInterrupt:
+        print("Bot stopped.")
+        break
+    except Exception as e:
+        print(f"Error: {e}")
+        time.sleep(5)
