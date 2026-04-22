@@ -1,0 +1,25 @@
+import requests
+import time
+
+BOT_TOKEN = "8570825705:AAFC2ytNrBeTGYJxe4qd07UoPVPjTzcFB3c"
+CHAT_ID = "5931826032"
+last_update = 0
+
+def send_message(text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    requests.get(url, params={"chat_id": CHAT_ID, "text": text})
+
+print("Bot running. Send a message to your bot.")
+
+while True:
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+    response = requests.get(url, params={"offset": last_update + 1, "timeout": 30}).json()
+    
+    if response.get("ok") and response["result"]:
+        for update in response["result"]:
+            last_update = update["update_id"]
+            msg = update.get("message", {})
+            text = msg.get("text") or msg.get("caption", "")
+            send_message(f"Received: {text}")
+    
+    time.sleep(1)
